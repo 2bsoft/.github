@@ -1,0 +1,80 @@
+name: Workspace Update
+
+on:
+  workflow_call:
+    inputs:
+      target_package:
+        description: 'Target submodule to update in workspace'
+        required: true
+        type: string
+      checkout_branch:
+        description: 'Branch to checkout'
+        required: false
+        type: string
+        default: 'main'
+      base_branch:
+        description: 'Branch to merge changes into'
+        required: false
+        type: string
+        default: 'main'
+      workspace_repository:
+        description: 'The workspace repository'
+        required: true
+        type: string
+    secrets:
+      github_token:
+        description: 'Github Token'
+        required: true
+
+jobs:
+  update-workspace:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Setup | Checkout workspace repository and branch
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.github_token }}
+          repository: ${{ inputs.workspace_repository }}
+          ref: ${{ inputs.checkout_branch }}
+          submodules: true
+
+      - name: Setup | Configure git user
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+        shell: bash
+
+      - name: Setup | Install UV
+        uses: astral-sh/setup-uv@v7
+
+      - name: Action | Update workspace
+        run: |
+          git submodule update --remote 'packages/${{ inputs.target_package }}'
+          uv lock
+        shell: bash
+
+      - name: Action | Push changes
+        run: |
+          git switch -c $GITHUB_RUN_ID
+          git commit -am "chore: update submodules"
+          git push -U origin $GITHUB_RUN_ID
+        shell: bash
+
+      - name: Action | Create pull request
+        id: create-pr
+        run: |
+          echo 'PR_URL=gh pr create --title "[Auto-generated] Submodules Updates $GITHUB_RUN_ID --body [Auto-generated] Submodules Updates $GITHUB_RUN_ID --base ${{ inputs.base_branch }} --head $GITHUB_RUN_ID' >> $GITHUB_OUTPUT
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.github_token }}
+
+      - name: Action | Auto-merge PR
+        run: |
+          gh pr merge --auto -r ${{ steps.create-pr.outputs.PR_URL }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.github_token }}
